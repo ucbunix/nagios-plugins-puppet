@@ -1,0 +1,95 @@
+#!/bin/env bash
+
+# Author: Aaron Russo <arusso@berkeley.edu>
+# Purpose: Nagios Puppet Agent check
+# Description:
+#   Checks to ensure that the puppet agent has run successfully within a
+#   specified period of time.
+
+STATE_OK=0
+STATE_WARNING=1
+STATE_CRITICAL=2
+STATE_UNKNOWN=3
+
+function usage {
+  $PRINTF "$0 [-c num] [-w num]\n"
+  $PRINTF "\n"
+  $PRINTF "  -u <m|h|d>  Unit of measurement (UOM)\n"
+  $PRINTF "                 m[inute], h[our], d[ay]\n"
+  $PRINTF "\n"
+  $PRINTF "  -c NUM      How many UOM since last successful run before we report critical?\n"
+  $PRINTF "\n"
+  $PRINTF "  -w NUM      How many UOM since last successful run before we report warning?\n"
+  $PRINTF "\n"
+  $PRINTF "  -h		print this screen\n"
+  exit 1
+}
+
+PRINTF=/usr/bin/printf
+ECHO=/bin/echo
+BC=/usr/bin/bc
+
+UOM=s
+CRITICAL_THRESHOLD=
+WARNING_THRESHOLD=
+while getopts :c:w:hu: opt; do
+  case $opt in
+    c)
+      CRITICAL_THRESHOLD=$OPTARG
+      ;;
+    w)
+      WARNING_THRESHOLD=$OPTARG
+      ;;
+    u)
+      [[ "$OPTARG" =~ "^(s(econd)?|m(inute)?|h(our)?|d(ay)?)$" ]] && \
+        UOM=$OPTARG || UOM=s
+      ;;
+    h)
+      usage
+      ;;
+  esac
+done
+
+# convert our UOM to seconds
+[[ ${CRITICAL_THRESHOLD} =~ ^[0-9]+\(\.[0-9]+\)?$ ]] || CRITICAL_THRESHOLD=0
+[[ ${WARNING_THRESHOLD} =~ ^[0-9]+\(\.[0-9]+\)?$ ]] || WARNING_THRESHOLD=0
+
+if [[ $UOM =~ ^m\(inute\)\? ]]; then
+  CRITICAL_THRESHOLD=$($ECHO ${CRITICAL_THRESHOLD} \* 60 | $BC)
+  WARNING_THRESHOLD=$($ECHO ${WARNING_THRESHOLD} \* 60 | $BC)
+fi
+
+if [[ "$UOM" =~ ^h\(our\)? ]]; then 
+  CRITICAL_THRESHOLD=$($ECHO ${CRITICAL_THRESHOLD} \* 60 \* 60 | $BC)
+  WARNING_THRESHOLD=$($ECHO ${WARNING_THRESHOLD} \* 60 \* 60 | $BC)
+fi
+
+if [[ "$UOM" =~ ^d\(ay\)? ]]; then
+  CRITICAL_THRESHOLD=$($ECHO ${CRITICAL_THRESHOLD} \* 60 \* 60 \* 24 | $BC)
+  WARNING_THRESHOLD=$($ECHO ${WARNING_THRESHOLD} \* 60 \* 60 \* 24 | $BC)
+fi
+
+# lets convert back to integers in case a float was provided
+CRITICAL_THRESHOLD=${CRITICAL_THRESHOLD/\.*}
+WARNING_THRESHOLD=${WARNING_THRESHOLD/\.*}
+
+SINCE_LASTRUN=$(echo $(date +%s) - $(cat /var/lib/puppet/state/last_run_summary.yaml|grep last_run|awk '{ print $2 }' ) | bc)
+
+# do some simple checks
+if [[ "${CRITICAL_THRESHOLD}" != "" && ${CRITICAL_THRESHOLD} -gt 0 && ${SINCE_LASTRUN} -ge ${CRITICAL_THRESHOLD} ]]; then
+  RC=$STATE_CRITICAL
+  $PRINTF "CRITICAL - last run was ${SINCE_LASTRUN}s ago (> ${CRITICAL_THRESHOLD})"
+elif [[ "${WARNING_THRESHOLD}" != "" && ${WARNING_THRESHOLD} -gt 0  &&  ${SINCE_LASTRUN} -ge WARNING_THRESHOLD ]]; then
+  RC=$STATE_WARNING
+  $PRINTF "WARNING - last run was ${SINCE_LASTRUN}s ago (> ${WARNING_THRESHOLD})"
+elif [ ${SINCE_LASTRUN} -ge 0 ]; then
+  RC=$STATE_OK
+  $PRINTF "OK - last run was ${SINCE_LASTRUN}s ago"
+else
+  RC=$STATE_UNKNOWN
+fi
+
+# return perf data
+$PRINTF "|lastrun=%s;%s;%s;;\n" ${SINCE_LASTRUN} ${WARNING_THRESHOLD} ${CRITICAL_THRESHOLD}
+
+exit $RC
