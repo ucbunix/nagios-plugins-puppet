@@ -25,13 +25,14 @@ function usage {
   exit 1
 }
 
-PRINTF=/usr/bin/printf
-ECHO=/bin/echo
-BC=/usr/bin/bc
+PRINTF=$(which printf)
+ECHO=$(which echo)
+EXPR=$(which expr)
 
-UOM=s
-CRITICAL_THRESHOLD=
-WARNING_THRESHOLD=
+UOM=s   # default to secondss
+CRITICAL_THRESHOLD= # no critical threshold by default
+WARNING_THRESHOLD= # no warning threshold by default
+
 while getopts :c:w:hu: opt; do
   case $opt in
     c)
@@ -55,25 +56,25 @@ done
 [[ ${WARNING_THRESHOLD} =~ ^[0-9]+\(\.[0-9]+\)?$ ]] || WARNING_THRESHOLD=0
 
 if [[ $UOM =~ ^m\(inute\)\? ]]; then
-  CRITICAL_THRESHOLD=$($ECHO ${CRITICAL_THRESHOLD} \* 60 | $BC)
-  WARNING_THRESHOLD=$($ECHO ${WARNING_THRESHOLD} \* 60 | $BC)
+  CRITICAL_THRESHOLD=$($EXPR ${CRITICAL_THRESHOLD} \* 60)
+  WARNING_THRESHOLD=$($EXPR ${WARNING_THRESHOLD} \* 60)
 fi
 
 if [[ "$UOM" =~ ^h\(our\)? ]]; then 
-  CRITICAL_THRESHOLD=$($ECHO ${CRITICAL_THRESHOLD} \* 60 \* 60 | $BC)
-  WARNING_THRESHOLD=$($ECHO ${WARNING_THRESHOLD} \* 60 \* 60 | $BC)
+  CRITICAL_THRESHOLD=$($EXPR ${CRITICAL_THRESHOLD} \* 60 \* 60)
+  WARNING_THRESHOLD=$($EXPR ${WARNING_THRESHOLD} \* 60 \* 60)
 fi
 
 if [[ "$UOM" =~ ^d\(ay\)? ]]; then
-  CRITICAL_THRESHOLD=$($ECHO ${CRITICAL_THRESHOLD} \* 60 \* 60 \* 24 | $BC)
-  WARNING_THRESHOLD=$($ECHO ${WARNING_THRESHOLD} \* 60 \* 60 \* 24 | $BC)
+  CRITICAL_THRESHOLD=$($EXPR ${CRITICAL_THRESHOLD} \* 60 \* 60 \* 24)
+  WARNING_THRESHOLD=$($EXPR ${WARNING_THRESHOLD} \* 60 \* 60 \* 24)
 fi
 
 # lets convert back to integers in case a float was provided
 CRITICAL_THRESHOLD=${CRITICAL_THRESHOLD/\.*}
 WARNING_THRESHOLD=${WARNING_THRESHOLD/\.*}
 
-SINCE_LASTRUN=$(echo $(date +%s) - $(cat /var/lib/puppet/state/last_run_summary.yaml|grep last_run|awk '{ print $2 }' ) | bc)
+SINCE_LASTRUN=$( $EXPR $(date +%s) - $(cat /var/lib/puppet/state/last_run_summary.yaml|grep last_run|awk '{ print $2 }' ) )
 
 # do some simple checks
 if [[ "${CRITICAL_THRESHOLD}" != "" && ${CRITICAL_THRESHOLD} -gt 0 && ${SINCE_LASTRUN} -ge ${CRITICAL_THRESHOLD} ]]; then
