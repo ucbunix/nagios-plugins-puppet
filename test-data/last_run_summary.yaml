@@ -1,0 +1,21 @@
+--- 
+  events: 
+    total: 0
+  time: 
+    last_run: 1378270925
+    package: 0.32817
+    yumrepo: 0.028902
+    ini_setting: 0.018522
+    exec: 5.807308
+    user: 0.007913
+    total: 27.659965875061
+    group: 0.006747
+    filebucket: 0.003876
+    config_retrieval: 2.08428287506104
+    service: 10.637035
+    schedule: 0.011843
+    file: 8.725367
+  changes: 
+    total: 0
+  resources: 
+    total: 248
