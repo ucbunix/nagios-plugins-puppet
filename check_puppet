@@ -1,96 +1,99 @@
-#!/bin/env bash
+#!/usr/bin/env ruby
 
-# Author: Aaron Russo <arusso@berkeley.edu>
-# Purpose: Nagios Puppet Agent check
-# Description:
-#   Checks to ensure that the puppet agent has run successfully within a
-#   specified period of time.
+require 'yaml'
+require 'optparse'
+require 'ostruct'
 
-STATE_OK=0
-STATE_WARNING=1
-STATE_CRITICAL=2
-STATE_UNKNOWN=3
+UNITS = %w[seconds minutes hours]
+UNIT_ALIASES = { 'd' => 'days', 'h' => 'hours', 'm' => 'minutes',
+                 's' => 'seconds' }
 
-function usage {
-  $PRINTF "$0 [-c num] [-w num]\n"
-  $PRINTF "\n"
-  $PRINTF "  -u <m|h|d>  Unit of measurement (UOM)\n"
-  $PRINTF "                 m[inute], h[our], d[ay]\n"
-  $PRINTF "\n"
-  $PRINTF "  -c NUM      How many UOM since last successful run before we report critical?\n"
-  $PRINTF "\n"
-  $PRINTF "  -w NUM      How many UOM since last successful run before we report warning?\n"
-  $PRINTF "\n"
-  $PRINTF "  -h		print this screen\n"
+to_s = { :days => 86400, :hours => 3600, :minutes => 60, :seconds => 1 } 
+
+options = OpenStruct.new
+options.units = :hours
+options.warn = 0
+options.warn_set = false
+options.crit = 0
+options.crit_set = false
+options.verbose = 0
+options.file = "/var/lib/puppet/state/last_run_summary.yaml"
+
+begin
+  OptionParser.new do |opts|
+    opts.banner = "Usage: #{$0}"
+    unit_list = (UNIT_ALIASES.keys + UNITS).join(',')
+    opts.on("-u", "--units UNIT", UNITS, UNIT_ALIASES,
+            "Select units of measurement", "   (#{unit_list})") do |unit|
+      options.units = unit.to_sym
+    end
+
+    opts.on("-w", "--warn [TIME]",Integer,
+            "time since last run that results in warning status") do |w|
+      options.warn = w
+      options.warn_set = true
+    end
+
+    opts.on("-c", "--crit [TIME]",Integer,
+            "time since last run that results in critical status") do |c|
+      options.crit = c
+      options.crit_set = true
+    end
+
+    opts.on("-v", "--verbose",Integer, "increase output verbosity") do |v|
+      options.verbose += 1
+    end
+
+    opts.on("-f", "--file [FILENAME]", String, "Puppet state file") do |f|
+      options.file = f
+    end
+  end.parse!
+rescue => e
+  puts e
+end
+
+options.warn = to_s[options.units] * options.warn
+options.crit = to_s[options.units] * options.crit
+
+if options.crit < options.warn
+  puts "Warning threshold must be less than critical!"
+  puts "#{options.warn} > #{options.crit}"
   exit 1
-}
+end
 
-PRINTF=$(which printf)
-ECHO=$(which echo)
-EXPR=$(which expr)
+begin
+  summary = YAML::load_file(options.file)
+rescue
+  puts "Unable to read input!"
+  exit 1
+end
+now = Time.now.to_i
 
-UOM=s   # default to secondss
-CRITICAL_THRESHOLD= # no critical threshold by default
-WARNING_THRESHOLD= # no warning threshold by default
+since = now - summary['time']['last_run']
 
-while getopts :c:w:hu: opt; do
-  case $opt in
-    c)
-      CRITICAL_THRESHOLD=$OPTARG
-      ;;
-    w)
-      WARNING_THRESHOLD=$OPTARG
-      ;;
-    u)
-      [[ "$OPTARG" =~ "^(s(econd)?|m(inute)?|h(our)?|d(ay)?)$" ]] && \
-        UOM=$OPTARG || UOM=s
-      ;;
-    h)
-      usage
-      ;;
-  esac
-done
+nag_code = { :ok => 0, :warning => 1, :critical => 2, :unknown => 3 }
+state = :ok
+info = "We're all fine here now, thank you. How are you?"
 
-# convert our UOM to seconds
-[[ ${CRITICAL_THRESHOLD} =~ ^[0-9]+\(\.[0-9]+\)?$ ]] || CRITICAL_THRESHOLD=0
-[[ ${WARNING_THRESHOLD} =~ ^[0-9]+\(\.[0-9]+\)?$ ]] || WARNING_THRESHOLD=0
+if since >= options.warn and options.warn_set
+  state = :warning
+  info = "#{since} > #{options.warn}"
+end
 
-if [[ $UOM =~ ^m\(inute\)\? ]]; then
-  CRITICAL_THRESHOLD=$($EXPR ${CRITICAL_THRESHOLD} \* 60)
-  WARNING_THRESHOLD=$($EXPR ${WARNING_THRESHOLD} \* 60)
-fi
+if since >= options.crit and options.crit_set
+  state = :critical
+  info = "#{since} > #{options.crit}"
+end
 
-if [[ "$UOM" =~ ^h\(our\)? ]]; then 
-  CRITICAL_THRESHOLD=$($EXPR ${CRITICAL_THRESHOLD} \* 60 \* 60)
-  WARNING_THRESHOLD=$($EXPR ${WARNING_THRESHOLD} \* 60 \* 60)
-fi
+# follow http://nagiosplug.sourceforge.net/developer-guidelines.html#PLUGOUTPUT
+perf_state = state.to_s.upcase
+puts "Agent " + perf_state + " - #{info}|since=#{since}s;#{options.warn};#{options.crit};;"
+if options.verbose > 0
+  # print out verbosity = 1
+  puts "time_total=#{summary['time']['total']}"
+end
 
-if [[ "$UOM" =~ ^d\(ay\)? ]]; then
-  CRITICAL_THRESHOLD=$($EXPR ${CRITICAL_THRESHOLD} \* 60 \* 60 \* 24)
-  WARNING_THRESHOLD=$($EXPR ${WARNING_THRESHOLD} \* 60 \* 60 \* 24)
-fi
-
-# lets convert back to integers in case a float was provided
-CRITICAL_THRESHOLD=${CRITICAL_THRESHOLD/\.*}
-WARNING_THRESHOLD=${WARNING_THRESHOLD/\.*}
-
-SINCE_LASTRUN=$( $EXPR $(date +%s) - $(cat /var/lib/puppet/state/last_run_summary.yaml|grep last_run|awk '{ print $2 }' ) )
-
-# do some simple checks
-if [[ "${CRITICAL_THRESHOLD}" != "" && ${CRITICAL_THRESHOLD} -gt 0 && ${SINCE_LASTRUN} -ge ${CRITICAL_THRESHOLD} ]]; then
-  RC=$STATE_CRITICAL
-  $PRINTF "CRITICAL - last run was ${SINCE_LASTRUN}s ago (> ${CRITICAL_THRESHOLD})"
-elif [[ "${WARNING_THRESHOLD}" != "" && ${WARNING_THRESHOLD} -gt 0  &&  ${SINCE_LASTRUN} -ge WARNING_THRESHOLD ]]; then
-  RC=$STATE_WARNING
-  $PRINTF "WARNING - last run was ${SINCE_LASTRUN}s ago (> ${WARNING_THRESHOLD})"
-elif [ ${SINCE_LASTRUN} -ge 0 ]; then
-  RC=$STATE_OK
-  $PRINTF "OK - last run was ${SINCE_LASTRUN}s ago"
-else
-  RC=$STATE_UNKNOWN
-fi
-
-# return perf data
-$PRINTF "|lastrun=%s;%s;%s;;\n" ${SINCE_LASTRUN} ${WARNING_THRESHOLD} ${CRITICAL_THRESHOLD}
-
-exit $RC
+if options.verbose > 1
+  # print out verbosity = 2
+  puts "resources=#{summary['resources']['total']}"
+end
