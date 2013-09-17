@@ -2,7 +2,7 @@
 
 BASE=$(cd $(dirname $0)/..; pwd)
 MAINT='arusso@berkeley.edu'
-VER='1.0.0'
+VER='2.0.0'
 VEND='UCB Unix Team'
 TMP=/tmp/check_puppet/usr/local/bin/
 URL=https://github.com/ucbunix/nagios-plugins-puppet
