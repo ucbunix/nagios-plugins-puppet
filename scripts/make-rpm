@@ -1,0 +1,12 @@
+#!/bin/bash
+
+BASE=$(cd $(dirname $0)/..; pwd)
+MAINT='arusso@berkeley.edu'
+VER='1.0.0'
+VEND='UCB Unix Team'
+TMP=/tmp/check_puppet/usr/local/bin/
+URL=https://github.com/ucbunix/nagios-plugins-puppet
+
+fpm -s dir -t rpm -n nagios-plugins-puppet -m $MAINT -v $VER \
+  --url $URL --license MIT --rpm-changelog $BASE/CHANGELOG \
+  -a noarch --vendor "$VEND" $BASE/check_puppet=/usr/local/bin/
